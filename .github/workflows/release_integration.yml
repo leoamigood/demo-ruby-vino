@@ -1,0 +1,58 @@
+name: Build image for integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag, SHA, or branch to deploy'
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+
+jobs:
+  linters:
+    name: Run linters
+    uses: ./.github/workflows/linters.yml
+  tests:
+    name: Run tests
+    needs: [ linters ]
+    uses: ./.github/workflows/tests.yml
+  release:
+    name: Release docker image
+    needs: [ tests ]
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_REPO: ghcr.io/txn-pro/platform/platform
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Define image version
+        run: |
+          echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.DOCKER_REPO }}:integration-${{ env.SHORT_SHA }}-${{ github.run_number }}
+          build-args: |
+            GIT_COMMIT_HASH=${{ env.SHORT_SHA }}
